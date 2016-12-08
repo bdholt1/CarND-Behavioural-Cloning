@@ -19,6 +19,9 @@ IMG_WIDTH = 320
 IMG_HEIGHT = 160
 
 def load_data(dir, csv):
+    """
+    Load the images and associated steering angles.
+    """
     imgs = []
     angles = []
     dataframe = pandas.read_csv(csv, header=None)
@@ -51,6 +54,7 @@ train_datagen = ImageDataGenerator(
         horizontal_flip=True,
         fill_mode='nearest')
 
+# Training data is from the left track
 X_train, Y_train = load_data("LEFT", "left_driving_log.csv")
 
 train_generator = train_datagen.flow(X_train, Y_train, batch_size=32)
@@ -58,6 +62,7 @@ train_generator = train_datagen.flow(X_train, Y_train, batch_size=32)
 # For validation (and test) the only thing we're going to do is rescale
 validation_datagen = ImageDataGenerator(rescale=1./255)
 
+# Validation data is from the right track
 X_valid, Y_valid = load_data("RIGHT", "right_driving_log.csv")
 
 validation_generator = validation_datagen.flow(X_valid, Y_valid, batch_size=32)
@@ -72,6 +77,8 @@ def baseline_model():
 
     # Compile model
     model.compile(loss='mean_squared_error', optimizer='adam')
+    
+    print("Using MLP model")
     return model
 
 def cnn_model():
@@ -79,17 +86,17 @@ def cnn_model():
 
     model.add(Convolution2D(32, 3, 3, border_mode='same', input_shape=(IMG_HEIGHT, IMG_WIDTH, 3), activation='relu'))
     model.add(Convolution2D(32, 3, 3, activation='relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(MaxPooling2D(pool_size=(4, 4)))
     model.add(Dropout(0.2))
 
     model.add(Convolution2D(64, 3, 3, border_mode='same', activation='relu'))
     model.add(Convolution2D(64, 3, 3, activation='relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(MaxPooling2D(pool_size=(4, 4)))
     model.add(Dropout(0.2))
 
     model.add(Convolution2D(128, 3, 3, border_mode='same', activation='relu'))
     model.add(Convolution2D(128, 3, 3, activation='relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(MaxPooling2D(pool_size=(4, 4)))
     model.add(Dropout(0.2))
 
     model.add(Flatten())
@@ -98,16 +105,17 @@ def cnn_model():
     model.add(Dense(1, init='normal'))
 
     model.compile(loss='mean_squared_error', optimizer='adam')
+    print("Using CNN model")
     return model
 
 model = cnn_model()
 
 model.fit_generator(
         train_generator,
-        samples_per_epoch=200, #2000
-        nb_epoch=5, #50
+        samples_per_epoch=2000, #2000
+        nb_epoch=10, #50
         validation_data=validation_generator,
-        nb_val_samples=80)  #800
+        nb_val_samples=800)  #800
 
 model.summary()
 # save model
