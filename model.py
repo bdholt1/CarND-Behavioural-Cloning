@@ -1,9 +1,10 @@
 import numpy as np
-from skimage import io
+from skimage import io, transform
 import os
 import glob
 import h5py
 import pandas
+import math
 
 from keras.preprocessing.image import ImageDataGenerator
 from keras.models import Sequential, model_from_json
@@ -15,10 +16,24 @@ from keras.preprocessing.image import ImageDataGenerator
 
 from matplotlib import pyplot as plt
 
-IMG_WIDTH = 320
-IMG_HEIGHT = 160
+IMG_WIDTH = 160
+IMG_HEIGHT = 80
 
-def load_data(dir, csv):
+def plot_histogram(y, label):
+    fig = plt.figure()
+    plt.hist(y, bins=100, label=label)
+    plt.legend()
+    plt.title("Histogram of steering angles")
+    plt.show()
+
+
+def rgb2yuv(rgb):
+    conv = np.array([[0.299, 0.587, 0.114],
+                     [-0.14713, -0.28886, 0.436],
+                     [0.615, -0.51499, -0.10001]])
+    return np.dot(rgb, conv.T)
+
+def load_data(dir, csv, offset):
     """
     Load the images and associated steering angles.
     """
@@ -26,98 +41,112 @@ def load_data(dir, csv):
     angles = []
     dataframe = pandas.read_csv(csv, header=None)
     dataset = dataframe.values
-    img_paths = dataset[:,0] # use the centre image
+    center_imgs = dataset[:,0]
+    left_imgs = dataset[:,1]
+    right_imgs = dataset[:,2]
     steering_angles = dataset[:,3] # steering angle
-    for img_path, angle in zip(img_paths, steering_angles):
+    for center, left, right, angle in zip(center_imgs, left_imgs, right_imgs, steering_angles):
         # discard the path - data was captured on multiple machines
-        # and the models run on multiple machines 
-        path, file = os.path.split(img_path)
+        # and the models run on multiple machines
+        path, center_file = os.path.split(center)
+        path, left_file = os.path.split(left)
+        path, right_file = os.path.split(right)
+
+        # discard datapoints that have a steering angle of 0
+        # otherwise the system becomes overly weighted to going straight
+        if math.isclose(angle, 0, abs_tol=0.001):
+            continue
+
         #print("file: ", dir + "/" + file, ",  angle: ", angle)
-        img = io.imread(dir + "/" + file)
-        imgs.append(img)
+        # center image
+        imgs.append(rgb2yuv(transform.resize(io.imread(dir + "/" + center_file), (IMG_HEIGHT, IMG_WIDTH))))
         angles.append(angle)
+
+        # left image
+        imgs.append(rgb2yuv(transform.resize(io.imread(dir + "/" + left_file), (IMG_HEIGHT, IMG_WIDTH))))
+        angles.append(angle - offset)
+
+        # right image
+        imgs.append(rgb2yuv(transform.resize(io.imread(dir + "/" + right_file), (IMG_HEIGHT, IMG_WIDTH))))
+        angles.append(angle + offset)
 
     X = np.array(imgs, dtype='float32')
     Y = np.array(angles, dtype='float32')
-    print("Loaded files from ", dir)
-    
-    return X, Y    
+    print("Loaded", X.shape[0], " files from ", dir)
+
+    plot_histogram(Y, dir)
+
+    return X, Y
 
 # Augment data for training using this configuration
 train_datagen = ImageDataGenerator(
-        rotation_range=5,
-	    width_shift_range=0.2,
-        height_shift_range=0.2,
+        samplewise_center=True,
+        samplewise_std_normalization=True,
+        width_shift_range=0.1,
+        height_shift_range=0.01,
         rescale=1./255,
-        shear_range=0.01,
-        zoom_range=0.2,
-        horizontal_flip=True,
         fill_mode='nearest')
 
 # Training data is from the left track
-X_train, Y_train = load_data("LEFT", "left_driving_log.csv")
+X_train, Y_train = load_data("TRAIN", "train_driving_log.csv", 0.1)
 
-train_generator = train_datagen.flow(X_train, Y_train, batch_size=32)
+train_generator = train_datagen.flow(X_train, Y_train, batch_size=128) #, save_to_dir="TRAIN_AUG/")
 
-# For validation (and test) the only thing we're going to do is rescale
-validation_datagen = ImageDataGenerator(rescale=1./255)
+# For validation and test normlise the images
+valid_test_datagen = ImageDataGenerator(
+        samplewise_center=True,
+        samplewise_std_normalization=True,
+        rescale=1./255)
 
-# Validation data is from the right track
-X_valid, Y_valid = load_data("RIGHT", "right_driving_log.csv")
+# Validation data is from the left track (1 lap)
+X_valid, Y_valid = load_data("VALID", "valid_driving_log.csv", 0.1)
 
-validation_generator = validation_datagen.flow(X_valid, Y_valid, batch_size=32)
+validation_generator = valid_test_datagen.flow(X_valid, Y_valid, batch_size=128)#, save_to_dir="VALID_AUG/")
 
-
-def baseline_model():
-    # create model
-    model = Sequential()
-    model.add(Reshape((IMG_WIDTH*IMG_HEIGHT*3,), input_shape=(IMG_WIDTH, IMG_HEIGHT, 3)))
-    model.add(Dense(512, init='normal', activation='relu'))
-    model.add(Dense(1, init='normal'))
-
-    # Compile model
-    model.compile(loss='mean_squared_error', optimizer='adam')
-    
-    print("Using MLP model")
-    return model
 
 def cnn_model():
     model = Sequential()
 
-    model.add(Convolution2D(32, 3, 3, border_mode='same', input_shape=(IMG_HEIGHT, IMG_WIDTH, 3), activation='relu'))
-    model.add(Convolution2D(32, 3, 3, activation='relu'))
-    model.add(MaxPooling2D(pool_size=(4, 4)))
-    model.add(Dropout(0.2))
+    model.add(Convolution2D(24, 5, 5, border_mode='valid', input_shape=(IMG_HEIGHT, IMG_WIDTH, 3), activation='relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    #model.add(Dropout(0.5))
 
-    model.add(Convolution2D(64, 3, 3, border_mode='same', activation='relu'))
-    model.add(Convolution2D(64, 3, 3, activation='relu'))
-    model.add(MaxPooling2D(pool_size=(4, 4)))
-    model.add(Dropout(0.2))
+    model.add(Convolution2D(36, 5, 5, border_mode='valid', activation='relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    #model.add(Dropout(0.5))
 
-    model.add(Convolution2D(128, 3, 3, border_mode='same', activation='relu'))
-    model.add(Convolution2D(128, 3, 3, activation='relu'))
-    model.add(MaxPooling2D(pool_size=(4, 4)))
-    model.add(Dropout(0.2))
+    model.add(Convolution2D(48, 5, 5, border_mode='valid', activation='relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    #model.add(Dropout(0.5))
+
+    model.add(Convolution2D(64, 3, 3, border_mode='valid', activation='relu'))
+    #model.add(Dropout(0.5))
+
+    model.add(Convolution2D(64, 3, 3, border_mode='valid', activation='relu'))
+    model.add(Dropout(0.5))
 
     model.add(Flatten())
-    model.add(Dense(512, activation='relu'))
-    model.add(Dropout(0.5))
+    model.add(Dense(1024, activation='relu'))
+    model.add(Dense(100, activation='relu'))
+    model.add(Dense(50, activation='relu'))
+    model.add(Dense(10, activation='relu'))
     model.add(Dense(1, init='normal'))
 
     model.compile(loss='mean_squared_error', optimizer='adam')
     print("Using CNN model")
+    model.summary()
     return model
 
 model = cnn_model()
 
 model.fit_generator(
         train_generator,
-        samples_per_epoch=2000, #2000
-        nb_epoch=10, #50
+        samples_per_epoch=20000,
+        nb_epoch=20,
         validation_data=validation_generator,
-        nb_val_samples=800)  #800
+        nb_val_samples=2000)
 
-model.summary()
+
 # save model
 json_string = model.to_json()
 with open('model.json', 'w') as outfile:

@@ -3,6 +3,7 @@ import base64
 import json
 
 import numpy as np
+from skimage import transform
 import socketio
 import eventlet
 import eventlet.wsgi
@@ -21,6 +22,12 @@ app = Flask(__name__)
 model = None
 prev_image_array = None
 
+def rgb2yuv(rgb):
+    conv = np.array([[0.299, 0.587, 0.114],
+                     [-0.14713, -0.28886, 0.436],
+                     [0.615, -0.51499, -0.10001]])
+    return np.dot(rgb, conv.T)
+
 @sio.on('telemetry')
 def telemetry(sid, data):
     # The current steering angle of the car
@@ -32,10 +39,16 @@ def telemetry(sid, data):
     # The current image from the center camera of the car
     imgString = data["image"]
     image = Image.open(BytesIO(base64.b64decode(imgString)))
-    image_array = np.asarray(image)
-    transformed_image_array = image_array[None, :, :, :]
+    image_array = rgb2yuv(transform.resize(np.asarray(image), (80, 160)))
+    transformed_image_array = np.array(image_array[None, :, :, :])
+
+    test_datagen = ImageDataGenerator(
+        samplewise_center=True,
+        samplewise_std_normalization=True,
+        rescale=1./255)
+    test_generator = test_datagen.flow(transformed_image_array, np.array([0]), batch_size=1)
     # This model currently assumes that the features of the model are just the images. Feel free to change this.
-    steering_angle = float(model.predict(transformed_image_array, batch_size=1))
+    steering_angle = float(model.predict_generator(test_generator, val_samples=1))
     # The driving model currently just outputs a constant throttle. Feel free to edit this.
     throttle = 0.2
     print(steering_angle, throttle)
