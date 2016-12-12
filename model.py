@@ -50,7 +50,7 @@ def load_data(dir, csv, offset):
     left_imgs = dataset[:,1]
     right_imgs = dataset[:,2]
     steering_angles = dataset[:,3] # steering angle
-    steering_angles_smoothed = moving_average(steering_angles, 3)
+    steering_angles_smoothed = moving_average(steering_angles, 5)
 
     """
     fig = plt.figure()
@@ -103,8 +103,8 @@ def load_data(dir, csv, offset):
 
 # Augment data for training using this configuration
 train_datagen = ImageDataGenerator(
-        width_shift_range=0.01,
-        height_shift_range=0.01,
+        width_shift_range=0.1,
+        height_shift_range=0.02,
         fill_mode='nearest')
 
 # Training data is from the left track
@@ -141,10 +141,10 @@ def cnn_model():
 
     model.add(Convolution2D(64, 3, 3, border_mode='valid', activation='relu'))
     model.add(Flatten())
-    model.add(Dropout(0.9))
+    model.add(Dropout(0.1))
 
     model.add(Dense(1024, activation='relu'))
-    model.add(Dropout(0.9))
+    model.add(Dropout(0.1))
 
     model.add(Dense(100, activation='relu'))
     model.add(Dense(50, activation='relu'))
@@ -158,15 +158,15 @@ def cnn_model():
 
 model = cnn_model()
 
-#if (os.path.exists('./model.h5')):
-#    print("Load pre-trained model weights")
-#    model.load_weights("model.h5")
+if (os.path.exists('./model.h5')):
+    print("Load pre-trained model weights")
+    model.load_weights("model.h5")
 
 
 model.fit_generator(
         train_generator,
         samples_per_epoch=20000,
-        nb_epoch=20,
+        nb_epoch=5,
         validation_data=validation_generator,
         nb_val_samples=2000)
 
@@ -179,7 +179,7 @@ with open('model.json', 'w') as outfile:
 model.save_weights("model.h5")
 
 print("Predicting on some training data")
-print(model.predict(X_train[0:300, :, :, :], batch_size=300))
+print(model.predict(X_train[0:100, :, :, :], batch_size=100))
 
 
 import os

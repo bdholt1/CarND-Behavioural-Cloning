@@ -1,44 +1,93 @@
-Is the solution design documented?
-The README thoroughly discusses the approach taken for deriving and designing a
- model architecture fit for solving the given problem.
- 
+Solution approach
+
 This is my attempt at cloning my simulator driving skills using deep learning to mimic
 behaviour to steer autonomously.
 
 I chose to use Keras (https://keras.io) to develop the model because Keras offers some
 very useful features that make the code quite concise, such as dataflow generators.
 
-My first attempt (as most would do) was to train a 2 layer MLP just to get an indication
-of how well the system was likely to do on the data.  On this very simple network I was
-able to get validation errors of down to X.
+My model follows the architecture of the NVIDIA paper very closely in terms of structure,
+with 5 convolutional layers and 4 fully connected layers.  NVIDIA uses images of 66x200
+whereas I use 80x160 (resizing the originals from 160x320).  This means that I end up with slightly
+more parameters than they did, but the architecture is the same.
+Additionally I added 2 dropout layers in the fully-connected section to reduce overfitting.
 
-The step up in the model is to use a CNN.  Here I chose to use 3 layers with activation,
-maxpooling and dropout.  
-kernel size, maxpool size, dropout rate?  
- 
+The theory is that the convolutional layers learn features and the fully connected layers learn
+to make a decision (output a value) based on those features.
+
+My biggest source of trouble was attempting to normalise the data.  I originally tried rescaling
+int Keras ImageDataGenerator and subsequently using a Keras Lambda to rescale, but after many
+trials where it appeared that the network wasn't learning and this was very frustrating. It was
+only after much debugging that I realised that scikit-image already scales the image to 0 - 1.
+
+I experimented with alternative normalisation approaches, trying grey-only, yuv (note the rgb2yuv function)
+and rgb.  The lighting is fairly consistent so there seems no real need for histogram normalisation.
+
+I found that the steering angles from the data I collected (with a keyboard) were very extreme
+and needed to be smoothed, and so another tune-able parameter is the number of samples to use when
+computing the moving average.
+
+After computing the smoothed steering angles I filter out examples with a steering angle that is
+very close to 0 because they dominate the training data otherwise. There are plots of the steering data
+before and after smoothing and also a histogram of the steering angles that are used for training,
+showing a Gaussian distribution - which is what you would expect.
+
+I also found that steering angles close to 1 were very extreme and threw off the training,
+so I eliminate that from the training set.
 
 
-Is the model architecture documented?
-The README provides sufficient details of the characteristics and qualities of 
-the architecture, such as the type of model used, the number of layers, 
-the size of each layer. Visualizations emphasizing particular qualities 
-of the architecture are encouraged.
+
+
+Model architecture
 
 The final model uses a CNN with 3 convolution layers, each followed by a non-linear
-activation layer, a maxpool layer and a dropout layer (to prevent overfitting). Each of
-the convolutional layers progressively increases the depth from 32 to 64 to 128.
+activation layer and a maxpool layer. Each of
+the convolutional layers progressively increases the depth from 24 to 36 to 48.
+A final pair of convolution layers at depth 64 with relu is added before flattening
 
-The final convolution output is flattened and fully connected with a 512 node hidden layer,
-which is then condensed into a single output node.  
+
+The final convolution output is flattened and fully connected with a 1024 node hidden layer,
+a 100 node layer, a 50 node layer, a 10 node layer and then a final output node.
 
 The model uses a mean squared error loss function (common to regression) and an
 Adam optimiser.
 
+One of the really nice things about Keras is that the code derived from it is effectively 'self-documenting'.
 
+This is the model: 3 convolutional layers with non-linear activation and maxpooling
+    model.add(Convolution2D(24, 5, 5, input_shape=(IMG_HEIGHT, IMG_WIDTH, 3), border_mode='valid', activation='relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    model.add(Convolution2D(36, 5, 5, border_mode='valid', activation='relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    model.add(Convolution2D(48, 5, 5, border_mode='valid', activation='relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+
+followed by 2 convolutional layers with just non-linear activation
+    model.add(Convolution2D(64, 3, 3, border_mode='valid', activation='relu'))
+
+    model.add(Convolution2D(64, 3, 3, border_mode='valid', activation='relu'))
+    model.add(Flatten())
+
+add dropout to combat overfitting
+    model.add(Dropout(0.1))
+
+fully connect to the final convolutional layer
+    model.add(Dense(1024, activation='relu'))
+
+another dropout to combat overfitting
+    model.add(Dropout(0.1))
+
+3 more fully connected layers leading to the output
+    model.add(Dense(100, activation='relu'))
+    model.add(Dense(50, activation='relu'))
+    model.add(Dense(10, activation='relu'))
+    model.add(Dense(1, init='normal'))
 
 Is the creation of the training dataset and training process documented?
-The README describes how the model was trained and what the characteristics 
-of the dataset are. Information such as how the dataset was generated and 
+The README describes how the model was trained and what the characteristics
+of the dataset are. Information such as how the dataset was generated and
 examples of images from the dataset should be included.
 
 Training and validation data was captured by driving each of the left and right tracks
@@ -48,5 +97,10 @@ drive offroad (while not recording) and then driving back onto the road (while r
 
 This resulted in 3357 images from the left track and 2948 images from the right track.
 
-The left track is used for training and the right track is help out for validation.
-Nothing is used for testing.
+It became clear that this would not be enough data so I drove the left track 5 more times,
+and then drove parts of the tracks that the model was getting wrong so that the model
+could work out what to do instead.
+
+For validation I drove the left track again and held out that entire lap as validation data.
+
+The data is augmented using an ImageDataGenerator with small width shifts and height shifts.
