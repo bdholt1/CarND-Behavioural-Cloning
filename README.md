@@ -27,15 +27,16 @@ and rgb.  The lighting is fairly consistent so there seems no real need for hist
 
 I found that the steering angles from the data I collected (with a keyboard) were very extreme
 and needed to be smoothed, and so another tune-able parameter is the number of samples to use when
-computing the moving average.
+computing the moving average. See driving_angles.png and driving_angles_smoothed.png for examples.
 
 After computing the smoothed steering angles I filter out examples with a steering angle that is
 very close to 0 because they dominate the training data otherwise. There are plots of the steering data
 before and after smoothing and also a histogram of the steering angles that are used for training,
-showing a Gaussian distribution - which is what you would expect.
+showing a Gaussian distribution - which is what you would expect. See driving_angles_histogram.png for
+the plot.
 
 I also found that steering angles close to 1 were very extreme and threw off the training,
-so I eliminate that from the training set.
+so I eliminate them from the training set.
 
 ## Model architecture
 
@@ -43,7 +44,6 @@ The final model uses a CNN with 3 convolution layers, each followed by a non-lin
 activation layer and a maxpool layer. Each of
 the convolutional layers progressively increases the depth from 24 to 36 to 48.
 A final pair of convolution layers at depth 64 with relu is added before flattening
-
 
 The final convolution output is flattened and fully connected with a 1024 node hidden layer,
 a 100 node layer, a 50 node layer, a 10 node layer and then a final output node.
