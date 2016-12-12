@@ -90,7 +90,7 @@ another dropout to combat overfitting
     model.add(Dense(10, activation='relu'))
     model.add(Dense(1, init='normal'))
 
-# Dataset creation
+## Dataset creation
 
 Training and validation data was captured by driving each of the left and right tracks
 for 2 laps in both the "forwards" direction (the default direction the simulator sets
