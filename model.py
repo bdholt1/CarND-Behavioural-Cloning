@@ -8,7 +8,7 @@ import math
 
 from keras.preprocessing.image import ImageDataGenerator
 from keras.models import Sequential, model_from_json
-from keras.layers import Dense, Dropout, Activation, Flatten, Reshape
+from keras.layers import Dense, Dropout, Activation, Flatten, Reshape, Lambda
 from keras.layers import Convolution2D, MaxPooling2D
 from keras.optimizers import Adam
 from keras.utils import np_utils
@@ -26,6 +26,11 @@ def plot_histogram(y, label):
     plt.title("Histogram of steering angles")
     plt.show()
 
+def moving_average(a, n=3) :
+    # from http://stackoverflow.com/questions/14313510/how-to-calculate-moving-average-using-numpy
+    ret = np.cumsum(a, dtype=float)
+    ret[n:] = ret[n:] - ret[:-n]
+    return ret[n - 1:] / n
 
 def rgb2yuv(rgb):
     conv = np.array([[0.299, 0.587, 0.114],
@@ -45,7 +50,19 @@ def load_data(dir, csv, offset):
     left_imgs = dataset[:,1]
     right_imgs = dataset[:,2]
     steering_angles = dataset[:,3] # steering angle
-    for center, left, right, angle in zip(center_imgs, left_imgs, right_imgs, steering_angles):
+    steering_angles_smoothed = moving_average(steering_angles, 3)
+
+    """
+    fig = plt.figure()
+    plt.plot(steering_angles)
+    plt.show()
+
+    fig = plt.figure()
+    plt.plot(steering_angles_smoothed)
+    plt.show()
+    """
+
+    for center, left, right, angle in zip(center_imgs, left_imgs, right_imgs, steering_angles_smoothed):
         # discard the path - data was captured on multiple machines
         # and the models run on multiple machines
         path, center_file = os.path.split(center)
@@ -57,76 +74,78 @@ def load_data(dir, csv, offset):
         if math.isclose(angle, 0, abs_tol=0.001):
             continue
 
+        # discard datapoints that are at the extremes because they don't lead to good models
+        if angle > 0.98 or angle < -0.98:
+            continue
+
         #print("file: ", dir + "/" + file, ",  angle: ", angle)
         # center image
-        imgs.append(rgb2yuv(transform.resize(io.imread(dir + "/" + center_file), (IMG_HEIGHT, IMG_WIDTH))))
+        imgs.append(transform.resize(io.imread(dir + "/" + center_file), (IMG_HEIGHT, IMG_WIDTH)))
         angles.append(angle)
 
         # left image
-        imgs.append(rgb2yuv(transform.resize(io.imread(dir + "/" + left_file), (IMG_HEIGHT, IMG_WIDTH))))
-        angles.append(angle - offset)
+        #imgs.append(rgb2yuv(transform.resize(io.imread(dir + "/" + left_file), (IMG_HEIGHT, IMG_WIDTH))))
+        # add the offset to the left image (so that you steer more right)
+        #angles.append(angle + offset)
 
         # right image
-        imgs.append(rgb2yuv(transform.resize(io.imread(dir + "/" + right_file), (IMG_HEIGHT, IMG_WIDTH))))
-        angles.append(angle + offset)
+        #imgs.append(rgb2yuv(transform.resize(io.imread(dir + "/" + right_file), (IMG_HEIGHT, IMG_WIDTH))))
+        # subtract the offset from the right image (so that you steer more left)
+        #angles.append(angle - offset)
 
     X = np.array(imgs, dtype='float32')
     Y = np.array(angles, dtype='float32')
     print("Loaded", X.shape[0], " files from ", dir)
 
-    plot_histogram(Y, dir)
+    #plot_histogram(Y, dir)
 
     return X, Y
 
 # Augment data for training using this configuration
 train_datagen = ImageDataGenerator(
-        samplewise_center=True,
-        samplewise_std_normalization=True,
-        width_shift_range=0.1,
+        width_shift_range=0.01,
         height_shift_range=0.01,
-        rescale=1./255,
         fill_mode='nearest')
 
 # Training data is from the left track
-X_train, Y_train = load_data("TRAIN", "train_driving_log.csv", 0.1)
+X_train, Y_train = load_data("TRAIN", "train_driving_log.csv", 0.05)
 
 train_generator = train_datagen.flow(X_train, Y_train, batch_size=128) #, save_to_dir="TRAIN_AUG/")
 
-# For validation and test normlise the images
-valid_test_datagen = ImageDataGenerator(
-        samplewise_center=True,
-        samplewise_std_normalization=True,
-        rescale=1./255)
+valid_datagen = ImageDataGenerator()
 
 # Validation data is from the left track (1 lap)
-X_valid, Y_valid = load_data("VALID", "valid_driving_log.csv", 0.1)
+X_valid, Y_valid = load_data("VALID", "valid_driving_log.csv", 0.05)
 
-validation_generator = valid_test_datagen.flow(X_valid, Y_valid, batch_size=128)#, save_to_dir="VALID_AUG/")
+validation_generator = valid_datagen.flow(X_valid, Y_valid, batch_size=128)#, save_to_dir="VALID_AUG/")
 
 
 def cnn_model():
     model = Sequential()
 
-    model.add(Convolution2D(24, 5, 5, border_mode='valid', input_shape=(IMG_HEIGHT, IMG_WIDTH, 3), activation='relu'))
+#    model.add(Lambda(lambda x: (x-127.5)/127.5,
+#                     input_shape=(IMG_HEIGHT, IMG_WIDTH, 3),
+#                     output_shape=(IMG_HEIGHT, IMG_WIDTH, 3)))
+
+
+    model.add(Convolution2D(24, 5, 5, input_shape=(IMG_HEIGHT, IMG_WIDTH, 3), border_mode='valid', activation='relu'))
     model.add(MaxPooling2D(pool_size=(2, 2)))
-    #model.add(Dropout(0.5))
 
     model.add(Convolution2D(36, 5, 5, border_mode='valid', activation='relu'))
     model.add(MaxPooling2D(pool_size=(2, 2)))
-    #model.add(Dropout(0.5))
 
     model.add(Convolution2D(48, 5, 5, border_mode='valid', activation='relu'))
     model.add(MaxPooling2D(pool_size=(2, 2)))
-    #model.add(Dropout(0.5))
 
     model.add(Convolution2D(64, 3, 3, border_mode='valid', activation='relu'))
-    #model.add(Dropout(0.5))
 
     model.add(Convolution2D(64, 3, 3, border_mode='valid', activation='relu'))
-    model.add(Dropout(0.5))
-
     model.add(Flatten())
+    model.add(Dropout(0.9))
+
     model.add(Dense(1024, activation='relu'))
+    model.add(Dropout(0.9))
+
     model.add(Dense(100, activation='relu'))
     model.add(Dense(50, activation='relu'))
     model.add(Dense(10, activation='relu'))
@@ -139,6 +158,11 @@ def cnn_model():
 
 model = cnn_model()
 
+#if (os.path.exists('./model.h5')):
+#    print("Load pre-trained model weights")
+#    model.load_weights("model.h5")
+
+
 model.fit_generator(
         train_generator,
         samples_per_epoch=20000,
@@ -148,9 +172,21 @@ model.fit_generator(
 
 
 # save model
-json_string = model.to_json()
 with open('model.json', 'w') as outfile:
-    outfile.write(json_string)
+    outfile.write(model.to_json())
 
 #save weights
 model.save_weights("model.h5")
+
+print("Predicting on some training data")
+print(model.predict(X_train[0:300, :, :, :], batch_size=300))
+
+
+import os
+test_imgs = []
+for fn in os.listdir('./TEST'):
+    print (fn)
+    test_imgs.append(transform.resize(io.imread("./TEST/" + fn), (IMG_HEIGHT, IMG_WIDTH)))
+X_test = np.array(test_imgs, dtype='float32')
+predictions = model.predict(X_test)
+print("test predictions = ", predictions)
