@@ -1,4 +1,6 @@
-Solution approach
+# Behavioural Cloning
+
+## Solution approach
 
 This is my attempt at cloning my simulator driving skills using deep learning to mimic
 behaviour to steer autonomously.
@@ -35,10 +37,7 @@ showing a Gaussian distribution - which is what you would expect.
 I also found that steering angles close to 1 were very extreme and threw off the training,
 so I eliminate that from the training set.
 
-
-
-
-Model architecture
+## Model architecture
 
 The final model uses a CNN with 3 convolution layers, each followed by a non-linear
 activation layer and a maxpool layer. Each of
@@ -55,6 +54,7 @@ Adam optimiser.
 One of the really nice things about Keras is that the code derived from it is effectively 'self-documenting'.
 
 This is the model: 3 convolutional layers with non-linear activation and maxpooling
+
     model.add(Convolution2D(24, 5, 5, input_shape=(IMG_HEIGHT, IMG_WIDTH, 3), border_mode='valid', activation='relu'))
     model.add(MaxPooling2D(pool_size=(2, 2)))
 
@@ -65,30 +65,32 @@ This is the model: 3 convolutional layers with non-linear activation and maxpool
     model.add(MaxPooling2D(pool_size=(2, 2)))
 
 followed by 2 convolutional layers with just non-linear activation
+
     model.add(Convolution2D(64, 3, 3, border_mode='valid', activation='relu'))
 
     model.add(Convolution2D(64, 3, 3, border_mode='valid', activation='relu'))
     model.add(Flatten())
 
 add dropout to combat overfitting
+
     model.add(Dropout(0.1))
 
 fully connect to the final convolutional layer
+
     model.add(Dense(1024, activation='relu'))
 
 another dropout to combat overfitting
+
     model.add(Dropout(0.1))
 
 3 more fully connected layers leading to the output
+
     model.add(Dense(100, activation='relu'))
     model.add(Dense(50, activation='relu'))
     model.add(Dense(10, activation='relu'))
     model.add(Dense(1, init='normal'))
 
-Is the creation of the training dataset and training process documented?
-The README describes how the model was trained and what the characteristics
-of the dataset are. Information such as how the dataset was generated and
-examples of images from the dataset should be included.
+# Dataset creation
 
 Training and validation data was captured by driving each of the left and right tracks
 for 2 laps in both the "forwards" direction (the default direction the simulator sets
